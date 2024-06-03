@@ -65,12 +65,8 @@ workflows:
       app_store_connect: app store connect
     environment:
       ios_signing: 
-        # provisioning_profiles:
-        #   - taskproof_profile
-        # certificates:
-        #   - dis_certificate
         distribution_type: app_store
-        bundle_identifier: com.zcoderz.taskproveApp
+        bundle_identifier: <app bundle id>
       groups:
         - shorebird_credentials
         - google_credentials
