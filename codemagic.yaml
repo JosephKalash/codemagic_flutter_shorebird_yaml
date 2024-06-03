@@ -1,0 +1,153 @@
+definitions:
+  scripts:
+    - &run_build_runner
+      name: run build_runner
+      script: |
+        flutter packages pub run build_runner build --delete-conflicting-outputs
+    - &shorebird_install
+      name: Install Shorebird CLI
+      script: |
+        curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh -sSf | bash
+        echo PATH="/Users/builder/.shorebird/bin:$PATH" >> $CM_ENV
+    - &setup_keystore
+      name: Setup the keystore
+      script: |
+        echo $KEYSTORE_FILE | base64 --decode > /tmp/keystore.jks
+        cat > "$CM_BUILD_DIR/android/key.properties" <<EOF
+        storePassword=$KEYSTORE_PASSWORD
+        keyPassword=$KEY_PASSWORD
+        keyAlias=$KEY_ALIAS
+        storeFile=/tmp/keystore.jks
+        EOF
+
+    - &get_dependancies
+      name: Get Flutter packages
+      script: |
+        flutter packages pub get
+    
+    - &build_android
+      name: Build aab
+      script: |
+        shorebird release android
+
+    - &build_android_patch
+      name: create patch
+      script: |
+        shorebird patch android
+
+    - &apply_provisioning_profiles
+      name: Apply Provisioning Profiles 
+      script: |
+        xcode-project use-profiles
+
+    - &build_ios
+      name: Build ipa
+      script: |
+        shorebird release ios -- --export-options-plist=/Users/builder/export_options.plist
+
+    - &build_ios_patch
+      name: iOS PATCH Build
+      script: |
+        shorebird patch ios
+
+    - &install_pods
+      name: Install pods
+      script: | 
+        find . -name "Podfile" -execdir pod install \;
+
+
+workflows:
+  release-workflow:
+    name: release Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    integrations:
+      app_store_connect: app store connect
+    environment:
+      ios_signing: 
+        # provisioning_profiles:
+        #   - taskproof_profile
+        # certificates:
+        #   - dis_certificate
+        distribution_type: app_store
+        bundle_identifier: com.zcoderz.taskproveApp
+      groups:
+        - shorebird_credentials
+        - google_credentials
+        - app_store_credentials
+      vars:
+        GOOGLE_PLAY_TRACK: "production"
+      flutter: stable
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v+([0-9]).+([0-9]).+([0-9])'
+      cancel_previous_builds: true
+    scripts: 
+      - *shorebird_install
+      - *setup_keystore
+      - *get_dependancies
+      - *run_build_runner
+      - *apply_provisioning_profiles
+      - *install_pods
+      - *build_ios
+      - *build_android
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/ios/ipa/*.ipa
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: $GOOGLE_PLAY_TRACK
+        submit_as_draft: false
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: true 
+        # Optional, defaults to MANUAL. Supported values: MANUAL, AFTER_APPROVAL or SCHEDULED
+        release_type: AFTER_APPROVAL
+      email:
+        recipients:
+          - joseph.kalash@zcoderz.com
+        notify:
+          success: true
+          failure: true
+
+
+  patch-android-workflow:
+    name: Android Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+    environment:
+      groups:
+        - shorebird_credentials
+        - google_credentials
+      vars:
+        GOOGLE_PLAY_TRACK: "production"
+      flutter: stable
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v+([0-9]).+([0-9]).+([0-9])-patch*'
+      cancel_previous_builds: true
+    scripts:
+      - *shorebird_install
+      - *setup_keystore
+      - *get_dependancies
+      - *run_build_runner
+      - *apply_provisioning_profiles
+      - *install_pods
+      - *build_ios_patch
+      - *build_android_patch
+    artifacts:
+      - build/**/outputs/**/*.aab
+    publishing:
+      email:
+        recipients:
+          - joseph.kalash@zcoderz.com
+        notify:
+          success: true
+          failure: true
+
